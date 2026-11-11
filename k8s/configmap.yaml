@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flask-app-config
+  namespace: flask-app
+  labels:
+    app: flask-app
+data:
+  MONGODB_DATABASE: "flask_db"
+  MONGODB_COLLECTION: "data"
+  APP_ENV: "production"

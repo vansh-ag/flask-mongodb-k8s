@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: flask-app
+  labels:
+    app: mongodb
+spec:
+  serviceName: mongodb-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+        - name: mongodb
+          image: mongo:8.0
+          ports:
+            - name: mongodb
+              containerPort: 27017
+          env:
+            # Root user: created by the official image on first start.
+            # Setting these two variables turns on authentication.
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secret
+                  key: MONGO_INITDB_ROOT_USERNAME
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secret
+                  key: MONGO_INITDB_ROOT_PASSWORD
+            # Application user: created by mongodb-init.sh.
+            - name: MONGODB_APP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secret
+                  key: MONGODB_APP_USERNAME
+            - name: MONGODB_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secret
+                  key: MONGODB_APP_PASSWORD
+            # Database for the init script (same value the Flask app uses).
+            - name: MONGO_INITDB_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: flask-app-config
+                  key: MONGODB_DATABASE
+            # The Pod's own IP, used by the probes (see below).
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          resources:
+            requests:
+              cpu: 200m
+              memory: 250Mi
+            limits:
+              cpu: 500m
+              memory: 500Mi
+          # The probes connect to the Pod IP, not localhost. While the init
+          # script runs, the image starts a temporary mongod that listens on
+          # 127.0.0.1 only, so these checks cannot pass until the real server
+          # is up and reachable over the network.
+          # Startup and liveness use a lightweight TCP check (done by the kubelet,
+          # no extra process in the container); only readiness runs mongosh.
+          startupProbe:
+            tcpSocket:
+              port: 27017
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 30
+          # Ready only when the application user can log in, i.e. the
+          # database is initialized and the Flask app can really connect.
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'mongosh "mongodb://${POD_IP}:27017/${MONGO_INITDB_DATABASE}?serverSelectionTimeoutMS=3000" --quiet --username "${MONGODB_APP_USERNAME}" --password "${MONGODB_APP_PASSWORD}" --authenticationDatabase "${MONGO_INITDB_DATABASE}" --eval "db.runCommand({ ping: 1 })"'
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 3
+          # Restart the container only if mongod stops accepting connections.
+          livenessProbe:
+            tcpSocket:
+              port: 27017
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - name: mongodb-data
+              mountPath: /data/db
+            - name: mongodb-init-script
+              mountPath: /docker-entrypoint-initdb.d/
+              readOnly: true
+      volumes:
+        - name: mongodb-init-script
+          configMap:
+            name: mongodb-init-script
+  volumeClaimTemplates:
+    - metadata:
+        name: mongodb-data
+        labels:
+          app: mongodb
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 2Gi

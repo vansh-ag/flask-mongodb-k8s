@@ -1,0 +1,26 @@
+# Keep secrets and unneeded files out of the Docker image
+
+# Secrets / environment files
+.env
+.env.*
+
+# Virtual environments
+.venv/
+venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Git, editors and OS files
+.git
+.gitignore
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Docker files themselves
+Dockerfile
+.dockerignore

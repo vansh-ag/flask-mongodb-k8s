@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongodb-init-script
+  namespace: flask-app
+  labels:
+    app: mongodb
+data:
+  mongodb-init.sh: |
+    #!/bin/bash
+    # Creates the application's MongoDB user.
+    #
+    # The official mongo image runs files in /docker-entrypoint-initdb.d/
+    # only on the FIRST start, when the data directory is empty. At that point
+    # it has already created the root user from MONGO_INITDB_ROOT_USERNAME /
+    # MONGO_INITDB_ROOT_PASSWORD, and a temporary mongod is listening on
+    # 127.0.0.1:27017 with authentication enabled.
+    #
+    # The body runs in a subshell ( ... ) so that set -e and any failure stay
+    # contained here, even when the entrypoint sources this file instead of
+    # executing it. A failure still returns a non-zero status to the entrypoint.
+    (
+        set -e
+
+        # Step 1: Stop with a clear message if any required variable is missing.
+        : "${MONGO_INITDB_ROOT_USERNAME:?MONGO_INITDB_ROOT_USERNAME is not set}"
+        : "${MONGO_INITDB_ROOT_PASSWORD:?MONGO_INITDB_ROOT_PASSWORD is not set}"
+        : "${MONGO_INITDB_DATABASE:?MONGO_INITDB_DATABASE is not set}"
+        : "${MONGODB_APP_USERNAME:?MONGODB_APP_USERNAME is not set}"
+        : "${MONGODB_APP_PASSWORD:?MONGODB_APP_PASSWORD is not set}"
+
+        echo "mongodb-init: setting up user '${MONGODB_APP_USERNAME}' on database '${MONGO_INITDB_DATABASE}'"
+
+        # Step 2: Log in as the root user (created by the image) using mongosh.
+        # Step 3: Switch to the application database and create the app user
+        #         with readWrite access to that database only.
+        # The app credentials are read inside mongosh with process.env, so the
+        # password is never pasted into the script text or shown in the command.
+        mongosh --quiet \
+          --host 127.0.0.1 \
+          --port 27017 \
+          --username "${MONGO_INITDB_ROOT_USERNAME}" \
+          --password "${MONGO_INITDB_ROOT_PASSWORD}" \
+          --authenticationDatabase admin \
+          --eval '
+            const dbName = process.env.MONGO_INITDB_DATABASE;
+            const username = process.env.MONGODB_APP_USERNAME;
+            const appDb = db.getSiblingDB(dbName);
+
+            // Skip if the user already exists, so running the script twice is safe.
+            if (appDb.getUser(username)) {
+              print("mongodb-init: user already exists, skipping");
+            } else {
+              appDb.createUser({
+                user: username,
+                pwd: process.env.MONGODB_APP_PASSWORD,
+                roles: [{ role: "readWrite", db: dbName }]
+              });
+              print("mongodb-init: user created");
+            }
+          '
+
+        echo "mongodb-init: done"
+    )

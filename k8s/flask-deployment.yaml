@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-app
+  namespace: flask-app
+  labels:
+    app: flask-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: flask-app
+  template:
+    metadata:
+      labels:
+        app: flask-app
+    spec:
+      containers:
+        - name: flask-app
+          image: flask-mongodb-app:1.0
+          # The image is already loaded into Minikube, so don't pull it.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5000
+          env:
+            # Non-secret settings from the existing ConfigMap.
+            - name: MONGODB_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: flask-app-config
+                  key: MONGODB_DATABASE
+            - name: MONGODB_COLLECTION
+              valueFrom:
+                configMapKeyRef:
+                  name: flask-app-config
+                  key: MONGODB_COLLECTION
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: flask-app-config
+                  key: APP_ENV
+            # Application credentials from the existing Secret.
+            - name: MONGODB_APP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secret
+                  key: MONGODB_APP_USERNAME
+            - name: MONGODB_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secret
+                  key: MONGODB_APP_PASSWORD
+          # Build MONGODB_URI from the injected variables at startup, then
+          # replace the shell with Python (exec) so signals reach Flask directly.
+          # "mongodb" is the ClusterIP Service name of MongoDB in this namespace.
+          # Nothing is echoed, so the credentials never appear in the logs.
+          command:
+            - sh
+            - -c
+            - 'export MONGODB_URI="mongodb://${MONGODB_APP_USERNAME}:${MONGODB_APP_PASSWORD}@mongodb:27017/flask_db?authSource=flask_db" && exec python app.py'
+          resources:
+            requests:
+              cpu: 200m
+              memory: 250Mi
+            limits:
+              cpu: 500m
+              memory: 500Mi
+          # Gives Flask up to 150 seconds (30 x 5s) to start.
+          startupProbe:
+            httpGet:
+              path: /
+              port: 5000
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          # Only send traffic to the Pod while it answers HTTP requests.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Restart the container if Flask stops responding for about 60 seconds.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3

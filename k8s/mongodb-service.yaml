@@ -1,0 +1,35 @@
+# Headless Service: gives the StatefulSet Pod a stable DNS name
+# (mongodb-0.mongodb-headless.flask-app.svc.cluster.local).
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-headless
+  namespace: flask-app
+  labels:
+    app: mongodb
+spec:
+  clusterIP: None
+  selector:
+    app: mongodb
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: 27017
+---
+# Normal ClusterIP Service: the internal address the Flask app connects to
+# (mongodb.flask-app.svc.cluster.local:27017). Not reachable from outside.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: flask-app
+  labels:
+    app: mongodb
+spec:
+  type: ClusterIP
+  selector:
+    app: mongodb
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: 27017

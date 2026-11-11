@@ -1,0 +1,24 @@
+# Horizontal Pod Autoscaler: keeps between 2 and 5 Flask Pods running,
+# adding Pods when average CPU usage goes above 70% of the CPU request
+# (70% of 200m = 140m per Pod).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: flask-app-hpa
+  namespace: flask-app
+  labels:
+    app: flask-app
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: flask-app
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
